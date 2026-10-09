@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import fcntl
 import hashlib
+import ipaddress
 import json
 import math
 import os
@@ -95,6 +96,7 @@ class RegtestFixture:
         run_id: str | uuid.UUID | None = None,
         miner_address: str = MINER_ADDRESS,
         profile: str = DIRECT_HEIGHT1_PROFILE,
+        network_subnet: str | None = None,
     ) -> None:
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
             raise FixtureError("timeout must be a positive finite number")
@@ -106,10 +108,24 @@ class RegtestFixture:
             raise FixtureError("miner_address must be a 35-character regtest transparent address")
         if not isinstance(profile, str) or profile not in _PROFILE_ACTIVATION_HEIGHTS:
             raise FixtureError("profile must be a supported fixed regtest profile")
+        if network_subnet is not None:
+            try:
+                if not isinstance(network_subnet, str):
+                    raise ValueError("expected a CIDR string")
+                subnet = ipaddress.IPv4Network(network_subnet, strict=True)
+                private_ranges = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+                if subnet.prefixlen > 29 or not any(
+                    subnet.subnet_of(ipaddress.IPv4Network(value)) for value in private_ranges
+                ):
+                    raise ValueError("expected a private subnet with room for the fixture")
+                network_subnet = str(subnet)
+            except ValueError as error:
+                raise FixtureError("network_subnet must be a canonical RFC1918 IPv4 CIDR of /29 or larger") from error
 
         self.timeout = float(timeout)
         self.miner_address = miner_address
         self.profile = profile
+        self.network_subnet = network_subnet
         self.nu6_3_activation_height = _PROFILE_ACTIVATION_HEIGHTS[profile]
         self.grpcurl = Path(grpcurl).expanduser().resolve(strict=True)
         self.proto_dir = Path(proto_dir).expanduser().resolve(strict=True)
@@ -198,6 +214,7 @@ class RegtestFixture:
                     *self._label_args(),
                     "--driver",
                     "bridge",
+                    *(["--subnet", self.network_subnet] if self.network_subnet is not None else []),
                     self.network_name,
                 ],
                 deadline=deadline,
@@ -236,7 +253,8 @@ class RegtestFixture:
 
             identity = {
                 "run_id": self.run_id,
-                "network": {"name": self.network_name, "id": self._network_id},
+                "network": {"name": self.network_name, "id": self._network_id,
+                            "requested_subnet": self.network_subnet},
                 "containers": dict(self._container_ids),
                 "lwd_volume": self._volume_name,
                 "images": images,

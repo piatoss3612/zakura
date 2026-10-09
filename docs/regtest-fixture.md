@@ -113,6 +113,23 @@ NU6.3 consensus branch.
 
 ## Evidence and cleanup
 
+### Explicit small networks
+
+Retained failed fixtures also retain their Docker networks. Docker's default
+address pools can therefore run out even with no running containers. Pass
+`network_subnet="10.42.0.0/28"` to `RegtestFixture`, or
+`--network-subnet 10.42.0.0/28` to the smoke CLI, to allocate a small explicit
+network without pruning failure evidence or changing daemon configuration.
+The CIDR must be canonical RFC1918 IPv4, with a prefix of /29 or shorter to
+fit the node, lightwalletd, donor, and gateway. When omitted, the existing
+Docker automatic-allocation behavior is unchanged.
+
+Parallel callers must choose non-overlapping subnets; Docker remains the
+authoritative allocator and rejects overlaps. A conflict is a startup failure,
+not permission to reuse or delete another fixture's network. The start proof
+records the requested subnet separately from resource identity. The existing
+run labels, original network ID, and ownership-checked cleanup are unchanged.
+
 The artifact directory is private and contains machine-readable evidence such
 as:
 

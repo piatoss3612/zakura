@@ -47,6 +47,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--proto-dir", required=True, type=Path, help="existing compatible lightwalletd descriptors")
     parser.add_argument("--artifacts-dir", type=Path, help="new output directory under an existing parent; never overwritten")
     parser.add_argument("--profile", choices=(DIRECT_HEIGHT1_PROFILE, CONTROLLED_ACTIVATION_PROFILE), default=DIRECT_HEIGHT1_PROFILE)
+    parser.add_argument("--network-subnet", help="explicit private IPv4 CIDR; overlaps fail without deleting existing networks")
     parser.add_argument("--blocks", type=_blocks, default=2, help="additional blocks after the height-1 bootstrap (1..1000; default: 2)")
     parser.add_argument("--timeout", type=_timeout, default=60.0, help="timeout per fixture phase in seconds (greater than 0, up to 300; default: 60)")
     return parser.parse_args(argv)
@@ -131,7 +132,8 @@ def run(args: argparse.Namespace) -> int:
         report["artifacts"] = str(artifacts)
         phase = "fixture"
         fixture = RegtestFixture(artifacts, args.grpcurl, args.proto_dir,
-                                 timeout=args.timeout, profile=args.profile)
+                                 timeout=args.timeout, profile=args.profile,
+                                 network_subnet=args.network_subnet)
         phase = "start"
         start = fixture.start()
         report["start_proof"] = start

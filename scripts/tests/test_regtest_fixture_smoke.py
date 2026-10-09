@@ -44,12 +44,13 @@ class FakeFixture:
     peers = []
     run_id_value = RUN_ID
 
-    def __init__(self, artifacts, grpcurl, proto_dir, *, timeout, profile):
+    def __init__(self, artifacts, grpcurl, proto_dir, *, timeout, profile, network_subnet):
         self.artifacts = Path(artifacts)
         self.grpcurl = Path(grpcurl)
         self.proto_dir = Path(proto_dir)
         self.timeout = timeout
         self.profile = profile
+        self.network_subnet = network_subnet
         self.run_id = type(self).run_id_value
         self.calls = []
         type(self).instances.append(self)
@@ -218,12 +219,14 @@ class RegtestFixtureSmokeTests(unittest.TestCase):
 
     def test_passed_run_writes_one_private_report_and_closes_after_final_parity(self):
         artifacts = self.root / "artifacts"
-        args = self.args("--artifacts-dir", str(artifacts), "--blocks", "3")
+        args = self.args("--artifacts-dir", str(artifacts), "--blocks", "3",
+                         "--network-subnet", "10.42.0.0/28")
         FakeFixture.reset(blocks=3)
 
         code, report = self.run_smoke(args)
 
         self.assertEqual(code, 0)
+        self.assertEqual(FakeFixture.instances[0].network_subnet, "10.42.0.0/28")
         self.assertEqual(report["schema_version"], 1)
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["exit_code"], 0)

@@ -88,6 +88,7 @@ class RegtestFixtureTests(unittest.TestCase):
         timeout=5,
         miner_address=fixture.MINER_ADDRESS,
         profile=fixture.DIRECT_HEIGHT1_PROFILE,
+        network_subnet=None,
     ):
         target = fixture.RegtestFixture(
             self.root / name,
@@ -97,6 +98,7 @@ class RegtestFixtureTests(unittest.TestCase):
             run_id=run_id or uuid.uuid4(),
             miner_address=miner_address,
             profile=profile,
+            network_subnet=network_subnet,
         )
         self.targets.append(target)
         return target
@@ -104,6 +106,35 @@ class RegtestFixtureTests(unittest.TestCase):
     @staticmethod
     def completed(stdout="", stderr="", returncode=0):
         return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+    def test_explicit_network_subnet_is_validated_before_artifacts_or_docker(self):
+        for value in (False, 1, "", "10.42.0.1/28", "10.42.0.0/30", "::/64",
+                      "8.8.8.0/24", "127.0.0.0/8", "224.0.0.0/8"):
+            with self.subTest(value=value), mock.patch.object(fixture.subprocess, "run") as run:
+                with self.assertRaisesRegex(fixture.FixtureError, "network_subnet"):
+                    self.make_fixture(network_subnet=value)
+                run.assert_not_called()
+                self.assertFalse((self.root / "artifacts").exists())
+        for index, value in enumerate(("10.42.0.0/28", "172.16.1.0/29", "192.168.42.0/24")):
+            target = self.make_fixture(f"subnet-{index}", network_subnet=value)
+            self.assertEqual(target.network_subnet, value)
+
+    def test_subnet_overlap_preserves_the_original_error_and_creates_no_other_resources(self):
+        target = self.make_fixture(network_subnet="10.42.0.0/28")
+        with mock.patch.object(target, "_verify_image", return_value={}), mock.patch.object(
+            target, "_ensure_resource_absent"
+        ), mock.patch.object(target, "_capture_diagnostics"), mock.patch.object(
+            target, "_owned_resource_id_if_present", return_value=None
+        ), mock.patch.object(
+            target, "_docker", side_effect=fixture.FixtureError("Pool overlaps with other one on this address space")
+        ) as docker:
+            with self.assertRaisesRegex(fixture.FixtureError, "Pool overlaps"):
+                target.start()
+        self.assertEqual(docker.call_count, 1)
+        self.assertEqual(docker.call_args.args[0][:2], ["network", "create"])
+        proof = json.loads((target.artifacts / "cleanup-proof.json").read_text())
+        self.assertTrue(proof["complete"])
+        self.assertEqual(proof["removed"], [])
 
     def parity_responses(
         self, *, height=3, branch=fixture.NU63_BRANCH_ID,
@@ -353,6 +384,7 @@ class RegtestFixtureTests(unittest.TestCase):
         target = self.make_fixture(
             run_id="33333333-3333-3333-3333-333333333333",
             miner_address=fixture.LOCKBOX_ADDRESS,
+            network_subnet="10.42.0.0/28",
         )
         parity = {
             "height": 1,
@@ -425,6 +457,8 @@ class RegtestFixtureTests(unittest.TestCase):
         self.assertEqual(json.loads((target.artifacts / "start-proof.json").read_text()), proof)
         network_create = next(command for command in docker_commands if command[:2] == ["network", "create"])
         self.assertNotIn("--internal", network_create)
+        self.assertEqual(network_create[network_create.index("--subnet") + 1], "10.42.0.0/28")
+        self.assertEqual(proof["identity"]["network"]["requested_subnet"], "10.42.0.0/28")
         config = target.config_path.read_text()
         self.assertIn('network = "Regtest"', config)
         self.assertIn('"NU6.3" = 1', config)
